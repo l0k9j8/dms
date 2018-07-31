@@ -3,6 +3,8 @@ package main
 //go:generate go-bindata data/
 
 import (
+	"time"
+	"fmt"
 	"bytes"
 	"encoding/json"
 	"flag"
@@ -11,65 +13,16 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"os/user"
+
 	"path/filepath"
 	"runtime"
 	"sync"
 	"syscall"
-	"time"
 
 	"./dlna/dms"
 	"./rrcache"
 )
 
-type dmsConfig struct {
-	Path                string
-	IfName              string
-	Http                string
-	FriendlyName        string
-	LogHeaders          bool
-	FFprobeCachePath    string
-	NoProbe             bool
-	StallEventSubscribe bool
-	NotifyInterval      time.Duration
-	IgnoreHidden        bool
-	IgnoreUnreadable    bool
-}
-
-func (config *dmsConfig) load(configPath string) {
-	file, err := os.Open(configPath)
-	if err != nil {
-		log.Printf("config error (config file: '%s'): %v\n", configPath, err)
-		return
-	}
-	defer file.Close()
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&config)
-	if err != nil {
-		log.Printf("config error: %v\n", err)
-		return
-	}
-}
-
-//default config
-var config = &dmsConfig{
-	Path:             "",
-	IfName:           "",
-	Http:             ":1338",
-	FriendlyName:     "",
-	LogHeaders:       false,
-	FFprobeCachePath: getDefaultFFprobeCachePath(),
-}
-
-func getDefaultFFprobeCachePath() (path string) {
-	_user, err := user.Current()
-	if err != nil {
-		log.Print(err)
-		return
-	}
-	path = filepath.Join(_user.HomeDir, ".dms-ffprobe-cache")
-	return
-}
 
 type fFprobeCache struct {
 	c *rrcache.RRCache
@@ -99,19 +52,14 @@ func (fc *fFprobeCache) Set(key interface{}, value interface{}) {
 
 func main() {
 	log.SetFlags(log.Ltime | log.Lshortfile)
+	config := newServerConfig()
+	var (
+		configFilePath string
+		showDefaultConfig bool
+	)
 
-	path := flag.String("path", config.Path, "browse root path")
-	ifName := flag.String("ifname", config.IfName, "specific SSDP network interface")
-	http := flag.String("http", config.Http, "http server port")
-	friendlyName := flag.String("friendlyName", config.FriendlyName, "server friendly name")
-	logHeaders := flag.Bool("logHeaders", config.LogHeaders, "log HTTP headers")
-	fFprobeCachePath := flag.String("fFprobeCachePath", config.FFprobeCachePath, "path to FFprobe cache file")
-	configFilePath := flag.String("config", "", "json configuration file")
-	flag.BoolVar(&config.NoProbe, "noProbe", false, "disable media probing with ffprobe")
-	flag.BoolVar(&config.StallEventSubscribe, "stallEventSubscribe", false, "workaround for some bad event subscribers")
-	flag.DurationVar(&config.NotifyInterval, "notifyInterval", 30*time.Second, "interval between SSPD announces")
-	flag.BoolVar(&config.IgnoreHidden, "ignoreHidden", false, "ignore hidden files and directories")
-	flag.BoolVar(&config.IgnoreUnreadable, "ignoreUnreadable", false, "ignore unreadable files and directories")
+	flag.StringVar(&configFilePath, "config", "", "toml configuration file")
+	flag.BoolVar(&showDefaultConfig, "print-default-config", false, "print default config")
 
 	flag.Parse()
 	if flag.NArg() != 0 {
@@ -119,15 +67,16 @@ func main() {
 		log.Fatalf("%s: %s\n", "unexpected positional arguments", flag.Args())
 	}
 
-	config.Path = *path
-	config.IfName = *ifName
-	config.Http = *http
-	config.FriendlyName = *friendlyName
-	config.LogHeaders = *logHeaders
-	config.FFprobeCachePath = *fFprobeCachePath
+	if showDefaultConfig {
+		fmt.Println(config.printDefault())
+		os.Exit(0)
+	}
 
-	if len(*configFilePath) > 0 {
-		config.load(*configFilePath)
+	if len(configFilePath) > 0 {
+		err := config.load(configFilePath)
+		if err != nil {
+			log.Fatalf("load file error %s\n", err)
+		}
 	}
 
 	cache := &fFprobeCache{
@@ -191,7 +140,7 @@ func main() {
 			},
 		},
 		StallEventSubscribe: config.StallEventSubscribe,
-		NotifyInterval:      config.NotifyInterval,
+		NotifyInterval:      time.Duration(config.NotifyInterval) * time.Second,
 		IgnoreHidden:        config.IgnoreHidden,
 		IgnoreUnreadable:    config.IgnoreUnreadable,
 	}
