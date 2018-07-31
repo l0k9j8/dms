@@ -133,7 +133,7 @@ func (me *contentDirectoryService) cdsObjectToUpnpavObject(cdsObject object, fil
 		Size:       uint64(fileInfo.Size()),
 		Resolution: resolution,
 	})
-	
+
 	if mimeType.IsVideo() || mimeType.IsImage() {
 		item.Res = append(item.Res, upnpav.Resource{
 			URL: (&url.URL{

@@ -42,7 +42,6 @@ const (
 	deviceIconPath              = "/deviceIcon"
 )
 
-
 func makeDeviceUuid(unique string) string {
 	h := md5.New()
 	if _, err := io.WriteString(h, unique); err != nil {
