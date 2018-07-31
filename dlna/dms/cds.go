@@ -12,10 +12,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/anacrolix/dms/dlna"
-	"github.com/anacrolix/dms/misc"
-	"github.com/anacrolix/dms/upnp"
-	"github.com/anacrolix/dms/upnpav"
+	"../../dlna"
+	"../../misc"
+	"../../upnp"
+	"../../upnpav"
 	"github.com/anacrolix/ffprobe"
 )
 
@@ -113,8 +113,8 @@ func (me *contentDirectoryService) cdsObjectToUpnpavObject(cdsObject object, fil
 	}()
 	item := upnpav.Item{
 		Object: obj,
-		// Capacity: 1 for raw, 1 for icon, plus transcodes.
-		Res: make([]upnpav.Resource, 0, 2+len(transcodes)),
+		// Capacity: 1 for raw, 1 for icon.
+		Res: make([]upnpav.Resource, 0, 2),
 	}
 	item.Res = append(item.Res, upnpav.Resource{
 		URL: (&url.URL{
@@ -133,11 +133,7 @@ func (me *contentDirectoryService) cdsObjectToUpnpavObject(cdsObject object, fil
 		Size:       uint64(fileInfo.Size()),
 		Resolution: resolution,
 	})
-	if mimeType.IsVideo() {
-		if !me.NoTranscode {
-			item.Res = append(item.Res, transcodeResources(host, cdsObject.Path, resolution, resDuration)...)
-		}
-	}
+	
 	if mimeType.IsVideo() || mimeType.IsImage() {
 		item.Res = append(item.Res, upnpav.Resource{
 			URL: (&url.URL{

@@ -8,7 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/anacrolix/dms/soap"
+	"../../soap"
 )
 
 type Browse struct {

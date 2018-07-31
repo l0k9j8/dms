@@ -18,8 +18,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/anacrolix/dms/dlna/dms"
-	"github.com/anacrolix/dms/rrcache"
+	"./dlna/dms"
+	"./rrcache"
 )
 
 type dmsConfig struct {
@@ -29,7 +29,6 @@ type dmsConfig struct {
 	FriendlyName        string
 	LogHeaders          bool
 	FFprobeCachePath    string
-	NoTranscode         bool
 	NoProbe             bool
 	StallEventSubscribe bool
 	NotifyInterval      time.Duration
@@ -108,7 +107,6 @@ func main() {
 	logHeaders := flag.Bool("logHeaders", config.LogHeaders, "log HTTP headers")
 	fFprobeCachePath := flag.String("fFprobeCachePath", config.FFprobeCachePath, "path to FFprobe cache file")
 	configFilePath := flag.String("config", "", "json configuration file")
-	flag.BoolVar(&config.NoTranscode, "noTranscode", false, "disable transcoding")
 	flag.BoolVar(&config.NoProbe, "noProbe", false, "disable media probing with ffprobe")
 	flag.BoolVar(&config.StallEventSubscribe, "stallEventSubscribe", false, "workaround for some bad event subscribers")
 	flag.DurationVar(&config.NotifyInterval, "notifyInterval", 30*time.Second, "interval between SSPD announces")
@@ -175,7 +173,6 @@ func main() {
 		RootObjectPath: filepath.Clean(config.Path),
 		FFProbeCache:   cache,
 		LogHeaders:     config.LogHeaders,
-		NoTranscode:    config.NoTranscode,
 		NoProbe:        config.NoProbe,
 		Icons: []dms.Icon{
 			dms.Icon{

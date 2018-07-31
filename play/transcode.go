@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/anacrolix/dms/misc"
+	"../../misc"
 )
 
 func main() {
@@ -19,10 +19,6 @@ func main() {
 	flag.Parse()
 	if flag.NArg() != 1 {
 		log.Fatalln("wrong argument count")
-	}
-	r, err := misc.Transcode(flag.Arg(0), *ss, *t)
-	if err != nil {
-		log.Fatalln(err)
 	}
 	go func() {
 		buf := bufio.NewWriterSize(os.Stdout, 1234)

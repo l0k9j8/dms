@@ -21,12 +21,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anacrolix/dms/dlna"
-	"github.com/anacrolix/dms/soap"
-	"github.com/anacrolix/dms/ssdp"
-	"github.com/anacrolix/dms/transcode"
-	"github.com/anacrolix/dms/upnp"
-	"github.com/anacrolix/dms/upnpav"
+	"../../dlna"
+	"../../soap"
+	"../../ssdp"
+	"../../upnp"
+	"../../upnpav"
 	"github.com/anacrolix/ffprobe"
 )
 
@@ -43,21 +42,6 @@ const (
 	deviceIconPath              = "/deviceIcon"
 )
 
-type transcodeSpec struct {
-	mimeType        string
-	DLNAProfileName string
-	Transcode       func(path string, start, length time.Duration, stderr io.Writer) (r io.ReadCloser, err error)
-}
-
-var transcodes = map[string]transcodeSpec{
-	"t": {
-		mimeType:        "video/mpeg",
-		DLNAProfileName: "MPEG_PS_PAL",
-		Transcode:       transcode.Transcode,
-	},
-	"vp8":        {mimeType: "video/webm", Transcode: transcode.VP8Transcode},
-	"chromecast": {mimeType: "video/mp4", Transcode: transcode.ChromecastTranscode},
-}
 
 func makeDeviceUuid(unique string) string {
 	h := md5.New()
@@ -229,8 +213,6 @@ type Server struct {
 	// The service SOAP handler keyed by service URN.
 	services   map[string]UPnPService
 	LogHeaders bool
-	// Disable transcoding, and the resource elements implied in the CDS.
-	NoTranscode bool
 	// Disable media probing with ffprobe
 	NoProbe bool
 	Icons   []Icon
@@ -302,31 +284,6 @@ type ffmpegInfoCacheKey struct {
 	ModTime int64
 }
 
-func transcodeResources(host, path, resolution, duration string) (ret []upnpav.Resource) {
-	ret = make([]upnpav.Resource, 0, len(transcodes))
-	for k, v := range transcodes {
-		ret = append(ret, upnpav.Resource{
-			ProtocolInfo: fmt.Sprintf("http-get:*:%s:%s", v.mimeType, dlna.ContentFeatures{
-				SupportTimeSeek: true,
-				Transcoded:      true,
-				ProfileName:     v.DLNAProfileName,
-			}.String()),
-			URL: (&url.URL{
-				Scheme: "http",
-				Host:   host,
-				Path:   resPath,
-				RawQuery: url.Values{
-					"path":      {path},
-					"transcode": {k},
-				}.Encode(),
-			}).String(),
-			Resolution: resolution,
-			Duration:   duration,
-		})
-	}
-	return
-}
-
 func parseDLNARangeHeader(val string) (ret dlna.NPTRange, err error) {
 	if !strings.HasPrefix(val, "npt=") {
 		err = errors.New("bad prefix")
@@ -339,7 +296,7 @@ func parseDLNARangeHeader(val string) (ret dlna.NPTRange, err error) {
 	return
 }
 
-// Determines the time-based range to transcode, and sets the appropriate
+// Sets the appropriate
 // headers. Returns !ok if there was an error and the caller should stop
 // handling the request.
 func handleDLNARange(w http.ResponseWriter, hs http.Header) (r dlna.NPTRange, partialResponse, ok bool) {
@@ -361,60 +318,6 @@ func handleDLNARange(w http.ResponseWriter, hs http.Header) (r dlna.NPTRange, pa
 	w.Header().Set(dlna.TimeSeekRangeDomain, h+"/*")
 	ok = true
 	return
-}
-
-func (me *Server) serveDLNATranscode(w http.ResponseWriter, r *http.Request, path_ string, ts transcodeSpec, tsname string) {
-	w.Header().Set(dlna.TransferModeDomain, "Streaming")
-	w.Header().Set("content-type", ts.mimeType)
-	w.Header().Set(dlna.ContentFeaturesDomain, (dlna.ContentFeatures{
-		Transcoded:      true,
-		SupportTimeSeek: true,
-	}).String())
-	// If a range of any kind is given, we have to respond with 206 if we're
-	// interpreting that range. Since only the DLNA range is handled in this
-	// function, it alone determines if we'll give a partial response.
-	range_, partialResponse, ok := handleDLNARange(w, r.Header)
-	if !ok {
-		return
-	}
-	ffInfo, _ := me.ffmpegProbe(path_)
-	if ffInfo != nil {
-		if duration, err := ffInfo.Duration(); err == nil {
-			s := fmt.Sprintf("%f", duration.Seconds())
-			w.Header().Set("content-duration", s)
-			w.Header().Set("x-content-duration", s)
-		}
-	}
-	stderrPath := func() string {
-		u, _ := user.Current()
-		return filepath.Join(u.HomeDir, ".dms", "log", tsname, filepath.Base(path_))
-	}()
-	os.MkdirAll(filepath.Dir(stderrPath), 0750)
-	logFile, err := os.Create(stderrPath)
-	if err != nil {
-		log.Printf("couldn't create transcode log file: %s", err)
-	} else {
-		defer logFile.Close()
-		log.Printf("logging transcode to %q", stderrPath)
-	}
-	p, err := ts.Transcode(path_, range_.Start, range_.End-range_.Start, logFile)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer p.Close()
-	// I recently switched this to returning 200 if no range is specified for
-	// pure UPnP clients. It's possible that DLNA clients will *always* expect
-	// 206. It appears the HTTP standard requires that 206 only be used if a
-	// response is not interpreting any range headers.
-	w.WriteHeader(func() int {
-		if partialResponse {
-			return http.StatusPartialContent
-		} else {
-			return http.StatusOK
-		}
-	}())
-	io.Copy(w, p)
 }
 
 func init() {
@@ -715,26 +618,16 @@ func (server *Server) initMux(mux *http.ServeMux) {
 			return
 		}
 		k := r.URL.Query().Get("transcode")
-		if k == "" {
-			mimeType, err := MimeTypeByPath(filePath)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set("Content-Type", string(mimeType))
-			http.ServeFile(w, r, filePath)
+		if k != "" {
+			log.Printf("transcode unsupported")
+		}
+		mimeType, err := MimeTypeByPath(filePath)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if server.NoTranscode {
-			http.Error(w, "transcodes disabled", http.StatusNotFound)
-			return
-		}
-		spec, ok := transcodes[k]
-		if !ok {
-			http.Error(w, fmt.Sprintf("bad transcode spec key: %s", k), http.StatusBadRequest)
-			return
-		}
-		server.serveDLNATranscode(w, r, filePath, spec, k)
+		w.Header().Set("Content-Type", string(mimeType))
+		http.ServeFile(w, r, filePath)
 	})
 	mux.HandleFunc(rootDescPath, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("content-type", `text/xml; charset="utf-8"`)

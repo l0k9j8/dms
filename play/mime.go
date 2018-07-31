@@ -6,7 +6,7 @@ import (
 	"flag"
 	"fmt"
 
-	"github.com/anacrolix/dms/dlna/dms"
+	"../../dms"
 )
 
 func main() {
